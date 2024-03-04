@@ -1,6 +1,10 @@
 package com.vk;
 
 import java.io.IOException;
+import ru.quad69.myparser.api.parser.Parser;
+import ru.quad69.myparser.api.parser.query.Logger;
+import ru.quad69.myparser.api.parser.query.Query;
+import ru.quad69.myparser.api.parser.query.ResultSet;
 
 /**
  * Hello world!
@@ -9,9 +13,6 @@ import java.io.IOException;
 public class App 
 {
     public static void main( String[] args ) throws IOException {
-        ProductParser parser = new ProductParser("https://www.dommalera.ru/catalog/germetiki/dlya_shvov_1/germetik_akrilovyy_krass_belyy_300ml/");
-
-        System.out.println(parser.getProductName());
-        System.out.println(parser.getProductBrandName());
+        new DomMaleraProductInfo().parse();
     }
 }
