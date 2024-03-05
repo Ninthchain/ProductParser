@@ -12,7 +12,20 @@ import ru.quad69.myparser.api.parser.query.ResultSet;
  */
 public class App 
 {
+    public static boolean check(String sentence){
+        String alphabet = "abcdefghijklmnopqrstuvwxyz";
+        sentence = sentence.toLowerCase();
+        int matches = 0;
+        for(char ch : sentence.toCharArray()) {
+            String pattern = String.format("%c", ch);
+            if (alphabet.contains(pattern)) {
+               alphabet = alphabet.replace(pattern, "");
+               ++matches;
+            }
+        }
+        return matches == 26;
+    }
     public static void main( String[] args ) throws IOException {
-        new DomMaleraProductInfo().parse();
+        System.out.println(check("The quick brown fox jumps over the lazy dog."));
     }
 }

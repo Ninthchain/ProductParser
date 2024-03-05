@@ -3,6 +3,7 @@ package com.vk;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import ru.quad69.myparser.api.http.Request;
 import ru.quad69.myparser.api.http.Response;
 import ru.quad69.myparser.api.http.url.URLBuilder;
 import ru.quad69.myparser.api.parser.Parser;
@@ -15,13 +16,14 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 
-class DomMaleraProductList extends Parser {
+public class DomMaleraProductList extends Parser {
     private static final Pattern SPLITTER = Pattern.compile("#");
     private static final Pattern NO_DIGIT = Pattern.compile("[^\\d.]");
     private static final Pattern COMMA = Pattern.compile(",");
     private static final Pattern MEASURE = Pattern.compile("Единица покупки:\\s*");
     private static final Pattern BX_TOTAL_ITEMS = Pattern.compile("BX\\('catalog_total'\\)\\.innerHTML = '(\\d+)'");
     private static final int PAGE_SIZE = 40;
+
     @Override
     public void parse(Query query) throws Exception {
         final String[] splitted = SPLITTER.split(query.content(), -2);
@@ -36,20 +38,53 @@ class DomMaleraProductList extends Parser {
         builder.setPath(builder.getPath().toLowerCase());
         builder.setQuery("is_catalog_ajax", "Y");
 
-        try (Proxy proxy = proxyProvider.acquire("dommalera.ru")){
+        int pageCount = 1;
+        int productsPerPage = 40;
+        try (Proxy proxy = proxyProvider.acquire("dommalera.ru")) {
+            // Первый запрос нужен, чтобы распарсить нужные данные. Кол-во продуктов в странице. Кол-во страниц
+            Response response = proxy.request("GET", builder.toURL()).send();
+            Document document = response.getContentAsHTML();
+            // берём ссылочные тэги содержащие НЕ ПОЛНУЮ нумерацию
+            Elements nums = document.select(".module-pagination .nums a");
+            Elements products = document.select(".catalog_block.items .catalog_item");
+            // берём кол-во страниц исходя из последнего a.
+            pageCount = Integer.parseInt(nums.get(nums.size() - 1).text());
+            productsPerPage = products.size();
 
-                Response response = proxy.request("GET", builder.toURL()).send();
-                Document document = response.getContentAsHTML();
-                Elements elements = document.select(".item_block");
+            // Итератор продуктов
+            int i = 0;
 
-                // Берём номера страничек
-                Elements numerationList = elements.select(".nums span");
-                int current = 1;
+            // Итератор страниц
+            int j = 0;
 
-                // В элементах пагинации (они не содержат полный список страниц, но имеется последний) возьмём последний
-                int total = Integer.parseInt(numerationList.get(numerationList.size() - 1).text());
-            System.out.println(numerationList.get(0).text());
+            // Не стал делать сложность алгоритма n^2. Сделаю одним циклом. Через два итератора
+            while (true) {
+                i++;
+                // Форматируем запрос, чтобы получить следующую страницу. Так как итерация идёт с нуля,
+                // то прибавляем к итератору + 1
+                String reqUrl = String.format("%s?PAGEN_1=%d", builder.toURL(), j + 1);
+                Document page = this.getPage(proxy.request("GET", reqUrl));
+                Elements productList = document.select(".catalog_block.items .catalog_item");
+
+                // Сбрасываем при последнем продукте
+                if (i == productsPerPage - 1) {
+                    i = 0;
+                    j++;
+                    continue;
+                }
+
+                // Выполняется после парсинга всех страниц
+                if (j == pageCount - 1) {
+                    break;
+                }
+            }
         }
+    }
+
+    Document getPage(Request req) throws Exception {
+        Response resp = req.send();
+        Document page = resp.getContentAsHTML();
+        return page;
     }
 }
 

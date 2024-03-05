@@ -1,6 +1,5 @@
 package com.vk;
 
-import com.sun.jdi.request.InvalidRequestStateException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
