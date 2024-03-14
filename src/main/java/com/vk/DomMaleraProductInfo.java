@@ -12,6 +12,7 @@ import ru.quad69.myparser.api.proxy.Proxy;
 import ru.wbooster.myparser.Currency;
 import ru.wbooster.myparser.Measure;
 import ru.wbooster.myparser.ProductResult;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Optional;
@@ -20,6 +21,7 @@ import java.util.regex.Pattern;
 public class DomMaleraProductInfo extends Parser {
     private static final Pattern SPLITTER = Pattern.compile("#");
     private static final Pattern BRAND_SLASH = Pattern.compile("\\s*/\\s*");
+
     @Override
     public void parse(Query query) throws Exception {
         final String[] splitted = SPLITTER.split(query.content(), -2);
@@ -82,7 +84,7 @@ public class DomMaleraProductInfo extends Parser {
             row.write(outputStream);
 
             // И после наш байтовый буфер сохраняем как результат парсинга.
-            query.results().put(outputStream.toByteArray());
+
         }
     }
 }

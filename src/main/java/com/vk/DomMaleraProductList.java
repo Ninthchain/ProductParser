@@ -3,17 +3,19 @@ package com.vk;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import ru.quad69.myparser.api.http.Request;
 import ru.quad69.myparser.api.http.Response;
 import ru.quad69.myparser.api.http.url.URLBuilder;
 import ru.quad69.myparser.api.parser.Parser;
 import ru.quad69.myparser.api.parser.query.Query;
 import ru.quad69.myparser.api.proxy.Proxy;
-import ru.quad69.myparser.api.proxy.ProxyProvider;
+import ru.wbooster.myparser.Currency;
+import ru.wbooster.myparser.Measure;
 import ru.wbooster.myparser.ProductResult;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 public class DomMaleraProductList extends Parser {
@@ -21,8 +23,8 @@ public class DomMaleraProductList extends Parser {
     private static final Pattern NO_DIGIT = Pattern.compile("[^\\d.]");
     private static final Pattern COMMA = Pattern.compile(",");
     private static final Pattern MEASURE = Pattern.compile("Единица покупки:\\s*");
-    private static final Pattern BX_TOTAL_ITEMS = Pattern.compile("BX\\('catalog_total'\\)\\.innerHTML = '(\\d+)'");
-    private static final int PAGE_SIZE = 40;
+
+    private static final int PAGE_SIZE = 32;
 
     @Override
     public void parse(Query query) throws Exception {
@@ -34,57 +36,74 @@ public class DomMaleraProductList extends Parser {
         final ByteArrayOutputStream outputStream = new ByteArrayOutputStream(512);
         final ArrayList<byte[]> results = new ArrayList<>(PAGE_SIZE);
 
-        URLBuilder builder = new URLBuilder("https", "www.dommalera.ru", productPath);
+        int currentPage = 1, totalPages = 1;
+        URLBuilder builder = new URLBuilder("https", new String[]{branchCode, "dommalera.ru"}, productPath);
+
         builder.setPath(builder.getPath().toLowerCase());
-        builder.setQuery("is_catalog_ajax", "Y");
+        builder.setQuery("PAGEN_1", "Y");
 
-        int pageCount = 1;
-        int productsPerPage = 40;
         try (Proxy proxy = proxyProvider.acquire("dommalera.ru")) {
-            // Первый запрос нужен, чтобы распарсить нужные данные. Кол-во продуктов в странице. Кол-во страниц
-            Response response = proxy.request("GET", builder.toURL()).send();
-            Document document = response.getContentAsHTML();
-            // берём ссылочные тэги содержащие НЕ ПОЛНУЮ нумерацию
-            Elements nums = document.select(".module-pagination .nums a");
-            Elements products = document.select(".catalog_block.items .catalog_item");
-            // берём кол-во страниц исходя из последнего a.
-            pageCount = Integer.parseInt(nums.get(nums.size() - 1).text());
-            productsPerPage = products.size();
+            do {
+                Response response = proxy.request("GET", builder.toURL()).send();
 
-            // Итератор продуктов
-            int i = 0;
-
-            // Итератор страниц
-            int j = 0;
-
-            // Не стал делать сложность алгоритма n^2. Сделаю одним циклом. Через два итератора
-            while (true) {
-                i++;
-                // Форматируем запрос, чтобы получить следующую страницу. Так как итерация идёт с нуля,
-                // то прибавляем к итератору + 1
-                String reqUrl = String.format("%s?PAGEN_1=%d", builder.toURL(), j + 1);
-                Document page = this.getPage(proxy.request("GET", reqUrl));
-                Elements productList = document.select(".catalog_block.items .catalog_item");
-
-                // Сбрасываем при последнем продукте
-                if (i == productsPerPage - 1) {
-                    i = 0;
-                    j++;
-                    continue;
+                if (response.getStatus() != 200) {
+                    throw new Exception("Invalid response: " + response.getStatus());
                 }
 
-                // Выполняется после парсинга всех страниц
-                if (j == pageCount - 1) {
-                    break;
+                Document page = response.getContentAsHTML();
+                Elements products = page.select(".catalog_block div.item_block");
+                Element numerationElement = page.selectFirst(".nums > .cur");
+                currentPage = numerationElement != null ? Integer.parseInt(numerationElement.text()) : 1;
+                numerationElement = page.select(".nums > :last-child").last();
+                totalPages = Integer.parseUnsignedInt(numerationElement.text());
+
+
+                for (int i = 0, j = products.size(); i < j; i++) {
+                    Element product = products.get(i);
+                    Element codeElement = Objects.requireNonNull(product.selectFirst(".like_icons span"), "Code not found.");
+                    Element pathElement = Objects.requireNonNull(product.selectFirst(".image_wrapper_block a"), "Path not found.");
+
+                    String codeText = codeElement.attr("data-item");
+
+                    row.code = Long.parseUnsignedLong(codeText);
+                    row.path = pathElement.attr("href");
+
+                    Element mainPriceElement = product.selectFirst(".price .price_value");
+                    String mainPriceText = Objects.requireNonNull(mainPriceElement, "Main price not found.").text().trim();
+                    mainPriceText = COMMA.matcher(mainPriceText).replaceFirst(".");
+                    mainPriceText = NO_DIGIT.matcher(mainPriceText).replaceAll("");
+                    if (mainPriceText.isEmpty()) continue;
+                    row.mainPrice = Double.parseDouble(mainPriceText);
+
+
+                    row.currency = Currency.RUB;
+
+                    row.measure = Optional.ofNullable(product.selectFirst(".price_measure"))
+                            .map((measure) -> MEASURE.matcher(measure.text()))
+                            .map((matcher) -> matcher.replaceFirst(""))
+                            .map(Measure::resolve)
+                            .orElse(Measure.PCE);
+
+                    row.available = product.selectFirst(".item-stock .value") != null;
+
+                    row.ranking = currentPage * PAGE_SIZE - PAGE_SIZE + i + 1;
+                    row.write(outputStream);
+
+                    results.add(outputStream.toByteArray());
+
+                    outputStream.reset();
                 }
-            }
+
+                query.setProgress(currentPage, totalPages);
+
+                query.logger().info("Found " + products.size() + " entries on page " + currentPage + " of " + totalPages);
+
+                results.clear();
+
+                Element element = page.selectFirst(".flex-nav-next .flex-next");
+                builder = element != null ? builder.resolve(element.attr("href")) : null;
+            } while (builder != null);
         }
     }
 
-    Document getPage(Request req) throws Exception {
-        Response resp = req.send();
-        Document page = resp.getContentAsHTML();
-        return page;
-    }
 }
-
